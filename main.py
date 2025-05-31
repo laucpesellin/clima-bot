@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # Ruta al archivo de credenciales JSON
-CREDENTIALS_PATH = "eli-rv-41340fd6e1c2.json"
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
 
 # Nombre del Google Sheet
 SPREADSHEET_NAME = "Convocatorias Clima"
