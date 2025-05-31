@@ -1,0 +1,6 @@
+Flask
+gspread
+oauth2client
+requests
+beautifulsoup4
+deep-translator
