@@ -14,9 +14,12 @@ def agregar_convocatorias():
         "https://www.googleapis.com/auth/drive.file",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        "eli-rv-7b7ef7f4f819.json", scope
-    )
+    import os
+CREDENTIALS_PATH = "/etc/secrets/eli-rv-41340fd6e1c2.json"
+
+creds = ServiceAccountCredentials.from_json_keyfile_name(
+    CREDENTIALS_PATH, scope
+)
     client = gspread.authorize(creds)
     sheet = client.open("Convocatorias Clima").sheet1
 
