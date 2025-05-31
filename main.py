@@ -110,5 +110,3 @@ def home():
     return "✅ Bot ejecutado correctamente desde la web 🌐"
 
 app.run(host='0.0.0.0', port=8080)
-
-🔧 Corregido indentación y actualizado código final del bot
