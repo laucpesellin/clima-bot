@@ -42,15 +42,15 @@ def scrape_fuente(nombre, url, tipo, idioma):
 
 def actualizar_convocatorias():
     gc = conectar_sheets()
-    hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("fuentes")
-    hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("convocatorias clima")
+    hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
+    hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
     
-    fuentes = hoja_fuentes.get_all_records()
+    Fuentes = hoja_fuentes.get_all_records()
     existentes = hoja_convocatorias.col_values(1)
 
     nuevas = []
 
-    for fuente in fuentes:
+    for fuente in Fuentes:
         nombre = fuente["Nombre"]
         url = fuente["URL"]
         tipo = fuente["Tipo"]
