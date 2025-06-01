@@ -22,10 +22,15 @@ def traducir(texto):
     except:
         return "⚠️ No traducido"
 
-def ya_existe(sheet, titulo, enlace):
+def ya_existe(sheet, titulo, organizacion, fecha, enlace):
     registros = sheet.get_all_values()
     for fila in registros:
-        if titulo in fila or enlace in fila:
+        if (
+            titulo.strip().lower() == fila[0].strip().lower() and
+            organizacion.strip().lower() == fila[1].strip().lower() and
+            fecha.strip() == fila[2].strip() and
+            enlace.strip() == fila[3].strip()
+        ):
             return True
     return False
 
@@ -51,13 +56,9 @@ def extraer_convocatorias(client):
                 if fecha_detectada and fecha_detectada > datetime.datetime.now():
                     titulo = texto
                     enlace = el.get("href") if el.name == "a" and el.get("href") else url
-
-                    if not ya_existe(hoja_convocatorias, titulo, enlace):
-                        fecha_str = fecha_detectada.strftime("%d/%m/%Y")
-                        descripcion = f"{titulo} - Detectado desde {nombre}"
-                        hoja_convocatorias.append_row([
-                            titulo, nombre, fecha_str, enlace, idioma, descripcion, traducir(descripcion)
-                        ])
+                if not ya_existe(hoja_convocatorias, titulo, nombre, fecha_str, enlace): hoja_convocatorias.append_row([
+        titulo, nombre, fecha_str, enlace, idioma, descripcion
+    ])
         except Exception as e:
             print(f"❌ Error con {nombre}: {e}")
 
