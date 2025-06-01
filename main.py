@@ -1,93 +1,74 @@
-from urllib.parse import urlparse
-from flask import Flask
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from bs4 import BeautifulSoup
-import requests
-from deep_translator import GoogleTranslator
-from datetime import datetime
 
-# === CONFIG ===
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # 👈 Reemplaza con el nombre exacto del JSON
-SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-SPREADSHEET_NAME = "Convocatorias Clima"
-SHEET_CONVOCATORIAS = "Convocatorias Clima"
-SHEET_FUENTES = "fuentes"
-
-# === APP ===
-app = Flask(__name__)
-
-# === FUNCIONES ===
-def es_url_valida(url):
-    try:
-        result = urlparse(url)
-        return all([result.scheme, result.netloc])
-    except:
-        return False
+# --- Autenticación Google Sheets ---
+SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+CREDENTIALS_PATH = 'eli-rv-0a9f3f56cefa.json'  # Ajusta con el nombre real del .json
+SPREADSHEET_NAME = 'Convocatorias Clima'
 
 def conectar_sheets():
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
-    client = gspread.authorize(creds)
-    return client.open(SPREADSHEET_NAME)
+    cliente = gspread.authorize(creds)
+    return cliente
 
-def ya_existe(sheet, titulo):
-    titulos_existentes = sheet.col_values(1)
-    return titulo.strip() in titulos_existentes
-
-def extraer_datos(url):
+def scrape_fuente(nombre, url, tipo, idioma):
     try:
-        res = requests.get(url, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
-        titulo = soup.title.text.strip() if soup.title else "Sin título"
-        contenido = soup.get_text()
-        return titulo, contenido
+        print(f"🌐 Revisando fuente: {nombre} ({url})")
+        response = requests.get(url, timeout=15)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Aquí ajusta los selectores según el sitio real
+        convocatorias = soup.find_all('article') or soup.find_all('div')
+        
+        if not convocatorias:
+            print(f"🚫 No se encontraron convocatorias en {nombre}")
+            return []
+
+        resultados = []
+        for c in convocatorias:
+            titulo = c.text.strip()[:80]
+            fecha = datetime.today().strftime('%Y-%m-%d')  # 👈 Ajusta si encuentras fecha real
+            resultados.append([titulo, url, tipo, idioma, fecha])
+        
+        print(f"✅ Encontradas {len(resultados)} convocatorias en {nombre}")
+        return resultados
+
     except Exception as e:
-        print(f"❌ Error accediendo a {url}: {e}")
-        return None, None
+        print(f"❌ Error con {nombre}: {e}")
+        return []
 
-def traducir_texto(texto):
-    try:
-        return GoogleTranslator(source="auto", target="pt").translate(texto)
-    except Exception as e:
-        print(f"⚠️ Error al traducir: {e}")
-        return texto
+def actualizar_convocatorias():
+    gc = conectar_sheets()
+    hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("fuentes")
+    hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("convocatorias clima")
+    
+    fuentes = hoja_fuentes.get_all_records()
+    existentes = hoja_convocatorias.col_values(1)
 
-def agregar_convocatorias():
-    print("🚀 Iniciando actualización de convocatorias...")
-    sheet = conectar_sheets()
-    hoja_conv = sheet.worksheet(SHEET_CONVOCATORIAS)
-    hoja_fuentes = sheet.worksheet(SHEET_FUENTES)
+    nuevas = []
 
-    fuentes = hoja_fuentes.col_values(1)[1:]  # omitir encabezado
+    for fuente in fuentes:
+        nombre = fuente["Nombre"]
+        url = fuente["URL"]
+        tipo = fuente["Tipo"]
+        idioma = fuente["Idioma"]
 
-    for idx, fuente_url in enumerate(fuentes, start=2):
-        fuente_url = fuente_url.strip()
-        if not es_url_valida(fuente_url):
-            print(f"❌ URL inválida en fila {idx}: {fuente_url}")
-            continue
+        nuevas_conv = scrape_fuente(nombre, url, tipo, idioma)
 
-        titulo, contenido = extraer_datos(fuente_url)
-        if not titulo or not contenido:
-            print(f"❌ No se pudo extraer contenido de {fuente_url}")
-            continue
+        for conv in nuevas_conv:
+            if conv[0] not in existentes:
+                nuevas.append(conv)
+            else:
+                print(f"🔁 Convocatoria duplicada omitida: {conv[0]}")
 
-        if ya_existe(hoja_conv, titulo):
-            print(f"⏭️ Ya existe: {titulo}")
-            continue
+    if nuevas:
+        hoja_convocatorias.append_rows(nuevas)
+        print(f"📝 Agregadas {len(nuevas)} nuevas convocatorias.")
+    else:
+        print("📭 No hay convocatorias nuevas para agregar.")
 
-        traduccion = traducir_texto(contenido[:1000])
-        hoja_conv.append_row([titulo, fuente_url, datetime.today().strftime('%Y-%m-%d'), traduccion])
-        print(f"✅ Agregado: {titulo}")
-
-# === RUTA PARA FLASK (UPTIME + EJECUCIÓN) ===
-@app.route('/')
-def home():
-    try:
-        agregar_convocatorias()
-        return "✅ Bot ejecutado correctamente 🎉"
-    except Exception as e:
-        return f"❌ Error en ejecución: {e}"
-
-# === EJECUTAR APP ===
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080)
+# Llama la función
+actualizar_convocatorias()
