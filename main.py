@@ -1,100 +1,93 @@
+from urllib.parse import urlparse
 from flask import Flask
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from deep_translator import GoogleTranslator
-import requests
 from bs4 import BeautifulSoup
-import datetime
-import dateparser
+import requests
+from deep_translator import GoogleTranslator
+from datetime import datetime
 
-# === Configuración Google Sheets ===
+# === CONFIG ===
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # 👈 Reemplaza con el nombre exacto del JSON
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
-SHEET_NAME = "Convocatorias Clima"
+SPREADSHEET_NAME = "Convocatorias Clima"
+SHEET_CONVOCATORIAS = "Convocatorias Clima"
+SHEET_FUENTES = "fuentes"
 
+# === APP ===
+app = Flask(__name__)
 
-# === Conexión a Google Sheets ===
+# === FUNCIONES ===
+def es_url_valida(url):
+    try:
+        result = urlparse(url)
+        return all([result.scheme, result.netloc])
+    except:
+        return False
+
 def conectar_sheets():
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
     client = gspread.authorize(creds)
-    sheet = client.open(SHEET_NAME).worksheet("Convocatorias Clima")
-    return sheet
+    return client.open(SPREADSHEET_NAME)
 
-# === Revisión para evitar duplicados ===
-def ya_existe_en_sheets(titulo):
-    sheet = conectar_sheets()
-    titulos = sheet.col_values(1)
-    return titulo in titulos
+def ya_existe(sheet, titulo):
+    titulos_existentes = sheet.col_values(1)
+    return titulo.strip() in titulos_existentes
 
-# === Función principal para scraping ===
+def extraer_datos(url):
+    try:
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+        titulo = soup.title.text.strip() if soup.title else "Sin título"
+        contenido = soup.get_text()
+        return titulo, contenido
+    except Exception as e:
+        print(f"❌ Error accediendo a {url}: {e}")
+        return None, None
+
+def traducir_texto(texto):
+    try:
+        return GoogleTranslator(source="auto", target="pt").translate(texto)
+    except Exception as e:
+        print(f"⚠️ Error al traducir: {e}")
+        return texto
+
 def agregar_convocatorias():
+    print("🚀 Iniciando actualización de convocatorias...")
     sheet = conectar_sheets()
-    fuentes_sheet = gspread.authorize(
-        ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
-    ).open(SHEET_NAME).worksheet("Fuentes")
-    
-    fuentes = fuentes_sheet.col_values(1)
-    
-    for fuente in fuentes:
-        try:
-            response = requests.get(fuente, timeout=10)
-            soup = BeautifulSoup(response.text, "html.parser")
+    hoja_conv = sheet.worksheet(SHEET_CONVOCATORIAS)
+    hoja_fuentes = sheet.worksheet(SHEET_FUENTES)
 
-            # Título (flexible)
-            titulo_element = soup.find("h1") or soup.find("title")
-            if titulo_element:
-                titulo = titulo_element.text.strip()
-            else:
-                titulo = "Título no disponible"
+    fuentes = hoja_fuentes.col_values(1)[1:]  # omitir encabezado
 
-            # Fecha de cierre tentativa (flexible)
-            texto_completo = soup.get_text()
-            fecha_cierre = ""
-            for palabra in texto_completo.split():
-                if "/" in palabra or "-" in palabra:
-                    try:
-                        fecha = datetime.strptime(palabra.strip(), "%d/%m/%Y")
-                        if fecha > datetime.now():
-                            fecha_cierre = fecha.strftime("%d/%m/%Y")
-                            break
-                    except:
-                        pass
+    for idx, fuente_url in enumerate(fuentes, start=2):
+        fuente_url = fuente_url.strip()
+        if not es_url_valida(fuente_url):
+            print(f"❌ URL inválida en fila {idx}: {fuente_url}")
+            continue
 
-            if not ya_existe_en_sheets(titulo):
-                sheet.append_row([titulo, fuente, fecha_cierre])
-                print(f"✅ Añadido: {titulo}")
-            else:
-                print(f"⛔ Ya existe: {titulo}")
+        titulo, contenido = extraer_datos(fuente_url)
+        if not titulo or not contenido:
+            print(f"❌ No se pudo extraer contenido de {fuente_url}")
+            continue
 
-        except Exception as e:
-            print(f"❌ Error con {fuente}: {e}")
+        if ya_existe(hoja_conv, titulo):
+            print(f"⏭️ Ya existe: {titulo}")
+            continue
 
-# === Traducción al portugués (columna adicional) ===
-def traducir_columnas():
-    sheet = conectar_sheets()
-    valores = sheet.get_all_values()
+        traduccion = traducir_texto(contenido[:1000])
+        hoja_conv.append_row([titulo, fuente_url, datetime.today().strftime('%Y-%m-%d'), traduccion])
+        print(f"✅ Agregado: {titulo}")
 
-    if len(valores[0]) < 4:
-        sheet.update_cell(1, 4, "Título en portugués")
-
-    for i in range(2, len(valores) + 1):
-        if len(valores[i - 1]) >= 1:
-            titulo = valores[i - 1][0]
-            try:
-                traduccion = GoogleTranslator(source='auto', target='pt').translate(titulo)
-                sheet.update_cell(i, 4, traduccion)
-                print(f"🌍 Traducido: {titulo}")
-            except:
-                print(f"⚠️ No se pudo traducir fila {i}")
-
-# === Flask app ===
-app = Flask(__name__)
-
-@app.route("/")
+# === RUTA PARA FLASK (UPTIME + EJECUCIÓN) ===
+@app.route('/')
 def home():
-    agregar_convocatorias()
-    traducir_columnas()
-    return "✅ Bot ejecutado correctamente desde la web 🎉"
+    try:
+        agregar_convocatorias()
+        return "✅ Bot ejecutado correctamente 🎉"
+    except Exception as e:
+        return f"❌ Error en ejecución: {e}"
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8080)
+# === EJECUTAR APP ===
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=8080)
