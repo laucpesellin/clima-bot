@@ -3,58 +3,74 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from deep_translator import GoogleTranslator
 
-# --- Autenticación Google Sheets ---
+# --- Configuración ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-CREDENTIALS_PATH = 'eli-rv-0a9f3f56cefa.json'  # Ajusta con el nombre real del .json
+CREDENTIALS_PATH = 'eli-rv-0a9f3f56cefa.json'  # <-- Reemplaza esto con el nombre real del archivo .json
 SPREADSHEET_NAME = 'Convocatorias Clima'
 
+# --- Conectar a Google Sheets ---
 def conectar_sheets():
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
     cliente = gspread.authorize(creds)
     return cliente
 
+# --- Validar URL ---
+def es_url_valida(url):
+    return url.startswith("http://") or url.startswith("https://")
+
+# --- Scraping simplificado ---
 def scrape_fuente(nombre, url, tipo, idioma):
+    print(f"🌐 Revisando fuente: {nombre} ({url})")
     try:
-        print(f"🌐 Revisando fuente: {nombre} ({url})")
         response = requests.get(url, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Aquí ajusta los selectores según el sitio real
-        convocatorias = soup.find_all('article') or soup.find_all('div')
-        
-        if not convocatorias:
-            print(f"🚫 No se encontraron convocatorias en {nombre}")
-            return []
 
-        resultados = []
-        for c in convocatorias:
-            titulo = c.text.strip()[:80]
-            fecha = datetime.today().strftime('%Y-%m-%d')  # 👈 Ajusta si encuentras fecha real
-            resultados.append([titulo, url, tipo, idioma, fecha])
-        
-        print(f"✅ Encontradas {len(resultados)} convocatorias en {nombre}")
-        return resultados
+        titulo = soup.title.text.strip() if soup.title else "Convocatoria sin título"
+        descripcion = soup.get_text().strip()[:1000]
 
+        descripcion_pt = GoogleTranslator(source='auto', target='pt').translate(descripcion)
+
+        hoy = datetime.today().strftime('%Y-%m-%d')  # Aquí podrías poner lógica real para extraer fecha de cierre
+
+        return [[
+            titulo,
+            nombre,
+            hoy,
+            url,
+            idioma,
+            descripcion,
+            descripcion_pt
+        ]]
     except Exception as e:
-        print(f"❌ Error con {nombre}: {e}")
+        print(f"❌ Error procesando {nombre}: {e}")
         return []
 
+# --- Actualizar hoja ---
 def actualizar_convocatorias():
     gc = conectar_sheets()
     hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
     hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
-    
-    Fuentes = hoja_fuentes.get_all_records()
-    existentes = hoja_convocatorias.col_values(1)
+
+    fuentes = hoja_fuentes.get_all_records()
+    existentes = hoja_convocatorias.col_values(1)  # Tópico
 
     nuevas = []
 
-    for fuente in Fuentes:
-        nombre = fuente["Nombre"]
-        url = fuente["URL"]
-        tipo = fuente["Tipo"]
-        idioma = fuente["Idioma"]
+    for fuente in fuentes:
+        if not all(k in fuente for k in ["Nombre", "URL", "Tipo", "Idioma"]):
+            print(f"⚠️ Encabezado faltante en fuente: {fuente}")
+            continue
+
+        nombre = fuente.get("Nombre", "").strip()
+        url = fuente.get("URL", "").strip()
+        tipo = fuente.get("Tipo", "").strip()
+        idioma = fuente.get("Idioma", "").strip()
+
+        if not es_url_valida(url):
+            print(f"⚠️ URL inválida: {url}")
+            continue
 
         nuevas_conv = scrape_fuente(nombre, url, tipo, idioma)
 
@@ -62,13 +78,14 @@ def actualizar_convocatorias():
             if conv[0] not in existentes:
                 nuevas.append(conv)
             else:
-                print(f"🔁 Convocatoria duplicada omitida: {conv[0]}")
+                print(f"🔁 Duplicado omitido: {conv[0]}")
 
     if nuevas:
         hoja_convocatorias.append_rows(nuevas)
-        print(f"📝 Agregadas {len(nuevas)} nuevas convocatorias.")
+        print(f"✅ {len(nuevas)} nuevas convocatorias agregadas.")
     else:
-        print("📭 No hay convocatorias nuevas para agregar.")
+        print("📭 No hay nuevas convocatorias para agregar.")
 
-# Llama la función
-actualizar_convocatorias()
+# --- Ejecutar ---
+if __name__ == '__main__':
+    actualizar_convocatorias()
