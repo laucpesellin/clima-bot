@@ -7,8 +7,10 @@ from bs4 import BeautifulSoup
 import datetime
 import dateparser
 
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # <-- AJUSTA si tu JSON tiene otro nombre
-SPREADSHEET_NAME = "Convocatorias Clima"
+# === Configuración Google Sheets ===
+SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
+SHEET_NAME = "Convocatorias Clima"
 
 
 # === Conexión a Google Sheets ===
