@@ -4,109 +4,73 @@ from oauth2client.service_account import ServiceAccountCredentials
 from deep_translator import GoogleTranslator
 import requests
 from bs4 import BeautifulSoup
+import datetime
+import dateparser
 
-# Ruta al archivo de credenciales JSON
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
-
-# Nombre del Google Sheet
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # <-- AJUSTA si tu JSON tiene otro nombre
 SPREADSHEET_NAME = "Convocatorias Clima"
 
 def conectar_sheets():
-    scope = [
-        'https://spreadsheets.google.com/feeds',
-        'https://www.googleapis.com/auth/drive'
-    ]
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
     client = gspread.authorize(creds)
-    sheet = client.open(SPREADSHEET_NAME).sheet1
-    return sheet
+    return client
 
-def traducir_descripcion(texto):
+def traducir(texto):
     try:
         return GoogleTranslator(source='auto', target='pt').translate(texto)
     except:
-        return "⚠️ No se pudo traducir"
+        return "⚠️ No traducido"
 
-def agregar_convocatorias():
-    sheet = conectar_sheets()
-    convocatorias = [
-        {
-            "titulo": "Nature & Climate AI Challenge",
-            "organizacion": "iCS",
-            "fechaCierre": "30/06/2025",
-            "enlace": "https://www2.fundsforngos.org/awards/ics-announces-nature-climate-ai-challenge-in-brazil/",
-            "idioma": "Inglés",
-            "descripcion": "Apoya tecnologías digitales aplicadas a desafíos climáticos y ambientales en Brasil."
-        },
-        {
-            "titulo": "FONTAGRO 2025",
-            "organizacion": "FONTAGRO",
-            "fechaCierre": "31/12/2025",
-            "enlace": "https://bio-emprender.iica.int/iica-opportunities/convocatoria-2025-fontagro/",
-            "idioma": "Español",
-            "descripcion": "Proyectos agro resilientes y sostenibles frente al cambio climático en América Latina."
-        }
-    ]
+def ya_existe(sheet, titulo, enlace):
+    registros = sheet.get_all_values()
+    for fila in registros:
+        if titulo in fila or enlace in fila:
+            return True
+    return False
 
-    for c in convocatorias:
-        descripcion_pt = traducir_descripcion(c["descripcion"])
-        sheet.append_row([
-            c["titulo"],
-            c["organizacion"],
-            c["fechaCierre"],
-            c["enlace"],
-            c["idioma"],
-            c["descripcion"],
-            descripcion_pt
-        ])
+def extraer_convocatorias(client):
+    hoja_fuentes = client.open(SPREADSHEET_NAME).worksheet("Fuentes")
+    hoja_convocatorias = client.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
+    fuentes = hoja_fuentes.get_all_records()
 
-def agregar_publicaciones():
-    sheet = conectar_sheets()
+    for fuente in fuentes:
+        url = fuente["URL"]
+        nombre = fuente["Nombre"]
+        idioma = fuente.get("Idioma", "Inglés")
 
-    revistas = [
-        {
-            "url": "https://www.mdpi.com/journal/agronomy",
-            "nombre": "MDPI Agronomy"
-        },
-        {
-            "url": "https://revistas.inia.cl/index.php/chileangj",
-            "nombre": "Chilean Journal of Agricultural Research"
-        }
-    ]
-
-    for revista in revistas:
         try:
-            response = requests.get(revista["url"], timeout=10)
+            response = requests.get(url, timeout=10)
             soup = BeautifulSoup(response.content, "html.parser")
-            titulos = soup.find_all("h3")[:1]
+            elementos = soup.find_all(["h2", "h3", "h4", "a", "strong", "p", "span"])
 
-            for titulo in titulos:
-                sheet.append_row([
-                    f"Artículo científico: {titulo.text.strip()}",
-                    revista["nombre"],
-                    "Sin fecha",
-                    revista["url"],
-                    "Inglés",
-                    "Artículo reciente en agronegocios y clima",
-                    traducir_descripcion("Artículo reciente en agronegocios y clima")
-                ])
+            for el in elementos:
+                texto = el.get_text().strip()
+                fecha_detectada = dateparser.parse(texto, settings={'PREFER_DATES_FROM': 'future'})
+
+                if fecha_detectada and fecha_detectada > datetime.datetime.now():
+                    titulo = texto
+                    enlace = el.get("href") if el.name == "a" and el.get("href") else url
+
+                    if not ya_existe(hoja_convocatorias, titulo, enlace):
+                        fecha_str = fecha_detectada.strftime("%d/%m/%Y")
+                        descripcion = f"{titulo} - Detectado desde {nombre}"
+                        hoja_convocatorias.append_row([
+                            titulo, nombre, fecha_str, enlace, idioma, descripcion, traducir(descripcion)
+                        ])
         except Exception as e:
-            print(f"❌ Error con {revista['nombre']}: {e}")
+            print(f"❌ Error con {nombre}: {e}")
 
-# === Función Principal ===
 def main():
-    agregar_convocatorias()
-    agregar_publicaciones()
-    print("✅ BOT ejecutado correctamente 🎉")
+    client = conectar_sheets()
+    extraer_convocatorias(client)
+    print("✅ BOT ejecutado con detección de fechas")
 
-main()
-
-# === Flask App para Render ===
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     main()
-    return "✅ Bot ejecutado correctamente desde la web 🌐"
+    return "✅ Bot ejecutado con filtros de fechas reales 📅🧠"
 
 app.run(host='0.0.0.0', port=8080)
