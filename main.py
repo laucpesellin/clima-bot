@@ -66,6 +66,45 @@ def scrape_fuente(nombre, url, tipo, idioma):
         print(f"❌ Error procesando {nombre}: {e}")
         return []
         
+# --- Actualizar hoja ---
+def actualizar_convocatorias():
+    gc = conectar_sheets()
+    hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
+    hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
+
+    fuentes = hoja_fuentes.get_all_records()
+    existentes = hoja_convocatorias.col_values(1)  # Tópico
+
+    nuevas = []
+
+    for fuente in fuentes:
+        if not all(k in fuente for k in ["Nombre", "URL", "Tipo", "Idioma"]):
+            print(f"⚠️ Encabezado faltante en fuente: {fuente}")
+            continue
+
+        nombre = fuente.get("Nombre", "").strip()
+        url = fuente.get("URL", "").strip()
+        tipo = fuente.get("Tipo", "").strip()
+        idioma = fuente.get("Idioma", "").strip()
+
+        if not es_url_valida(url):
+            print(f"⚠️ URL inválida: {url}")
+            continue
+
+        nuevas_conv = scrape_fuente(nombre, url, tipo, idioma)
+
+        for conv in nuevas_conv:
+            if conv[0] not in existentes:
+                nuevas.append(conv)
+            else:
+                print(f"🔁 Duplicado omitido: {conv[0]}")
+
+    if nuevas:
+        hoja_convocatorias.append_rows(nuevas)
+        print(f"✅ {len(nuevas)} nuevas convocatorias agregadas.")
+    else:
+        print("📭 No hay nuevas convocatorias para agregar.")
+
 # --- Ejecutar ---
 if __name__ == '__main__':
     actualizar_convocatorias()
