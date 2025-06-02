@@ -110,6 +110,10 @@ def actualizar_convocatorias():
         if nuevas:
             hoja_convocatorias.append_rows(nuevas)
             print(f"✅ {len(nuevas)} nuevas convocatorias agregadas.")
+        if nuevas:
+            print("📤 Escribiendo nuevas convocatorias en la hoja...")
+            hoja_convocatorias.append_rows(nuevas)
+            print(f"📝 Agregadas {len(nuevas)} nuevas convocatorias.")
         else:
             print("📭 No hay convocatorias nuevas.")
     except APIError as e:
