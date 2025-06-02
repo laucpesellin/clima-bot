@@ -1,120 +1,125 @@
+import time
+import requests
+from flask import Flask
+from bs4 import BeautifulSoup
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import requests
-from bs4 import BeautifulSoup
-from deep_translator import GoogleTranslator
-import dateparser
-import time
-from flask import Flask
+from dateparser import parse
+from googletrans import Translator
+from gspread.exceptions import APIError
 
 app = Flask(__name__)
 
-# 🌍 Configuración de acceso a Google Sheets
-SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # Asegúrate de tener esto bien cargado en Render
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # ← Asegúrate de que ese sea el nombre correcto de tu archivo JSON
 SPREADSHEET_NAME = "Convocatorias Clima"
 
-# 🎯 Conectar a Google Sheets
 def conectar_sheets():
+    SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
-    gc = gspread.authorize(creds)
-    return gc
+    client = gspread.authorize(creds)
+    return client
 
-# 🧠 Extraer datos de una fuente según tipo
-def scrape_fuente(nombre, url, tipo, idioma):
-    convocatorias = []
-    headers = {"User-Agent": "Mozilla/5.0"}
-
+def traducir(texto, destino="pt"):
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.content, "html.parser")
+        traductor = Translator()
+        resultado = traductor.translate(texto, dest=destino)
+        return resultado.text
+    except Exception as e:
+        print(f"⚠️ Error al traducir: {e}")
+        return texto
 
-        # ⏳ Extraer títulos tentativos de convocatorias
-        titulos = soup.find_all(['h2', 'h3', 'h4'])
-        for t in titulos:
-            titulo = t.get_text(strip=True)
+def extraer_fecha(texto):
+    fecha = parse(texto, languages=['es', 'en', 'pt'])
+    if fecha:
+        return fecha.strftime('%Y-%m-%d')
+    return ''
 
-            # 🔍 Buscar fecha asociada al texto
-            text = t.find_next().get_text(" ", strip=True)
-            fecha = dateparser.parse(text, languages=['en', 'es', 'pt'])
+def scrape_fuente(nombre, url, tipo, idioma):
+    print(f"🌐 Accediendo a: {url}")
+    convocatorias = []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+        respuesta = requests.get(url, headers=headers, timeout=20)
+        respuesta.raise_for_status()
 
-            if not fecha:
-                continue
+        soup = BeautifulSoup(respuesta.text, "html.parser")
+        bloques = soup.find_all(["article", "div", "section", "li", "tr", "td", "p"])
 
-            # 📅 Validar que la fecha sea futura
-            if fecha < datetime.now():
-                continue
-
-            # 💬 Descripción
-            descripcion = text if len(text) < 500 else text[:500]
-
-            # 🇧🇷 Traducir si no es portugués
-            descripcion_pt = descripcion
-            if idioma.lower() != "portugués":
-                try:
-                    descripcion_pt = GoogleTranslator(source='auto', target='pt').translate(descripcion)
-                except:
-                    print(f"⚠️ No se pudo traducir: {descripcion}")
-
-            # 🧾 Construir fila
-            fila = [
-                titulo.strip(),
-                nombre,
-                fecha.strftime("%Y-%m-%d"),
-                url,
-                idioma,
-                descripcion,
-                descripcion_pt
-            ]
-            convocatorias.append(fila)
-
-            # 💤 Esperar para evitar abuso
-            time.sleep(1)
-
+        for bloque in bloques:
+            texto = bloque.get_text(separator=" ", strip=True)
+            if any(palabra in texto.lower() for palabra in ["call", "convocatoria", "submit", "submission", "deadline", "apply", "aplica", "fecha límite", "fecha de cierre"]):
+                fecha = extraer_fecha(texto)
+                if fecha:
+                    hoy = datetime.today().strftime('%Y-%m-%d')
+                    if fecha >= hoy:
+                        descripcion = texto.strip()
+                        descripcion_pt = traducir(descripcion) if idioma.lower() != "portugués" else descripcion
+                        convocatorias.append([
+                            nombre,  # 🧠 Tópico
+                            nombre,  # Entidad
+                            fecha,
+                            url,
+                            idioma,
+                            descripcion,
+                            descripcion_pt
+                        ])
+        time.sleep(2)  # 😴 Evita sobrecargar
     except Exception as e:
         print(f"❌ Error con {nombre}: {e}")
 
     return convocatorias
 
-# 📊 Actualizar hoja con nuevas convocatorias
 def actualizar_convocatorias():
-    gc = conectar_sheets()
-    hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
-    hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
+    try:
+        gc = conectar_sheets()
+        hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
+        hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
 
-    fuentes = hoja_fuentes.get_all_records()
-    existentes = hoja_convocatorias.col_values(1)
+        print("📥 Obteniendo fuentes...")
+        fuentes = hoja_fuentes.get_all_records()
+        time.sleep(2)
 
-    nuevas = []
+        print("📥 Obteniendo registros ya existentes...")
+        existentes = hoja_convocatorias.col_values(1)
+        time.sleep(2)
 
-    for fuente in fuentes:
-        nombre = fuente["Nombre"]
-        url = fuente["URL"]
-        tipo = fuente["Tipo"]
-        idioma = fuente["Idioma"]
+        nuevas = []
 
-        print(f"🔍 Revisando {nombre}...")
-        convocatorias = scrape_fuente(nombre, url, tipo, idioma)
+        for fuente in fuentes:
+            nombre = fuente["Nombre"]
+            url = fuente["URL"]
+            tipo = fuente["Tipo"]
+            idioma = fuente["Idioma"]
 
-        for conv in convocatorias:
-            if conv[0] not in existentes:
-                nuevas.append(conv)
-            else:
-                print(f"🔁 Ya existía: {conv[0]}")
+            print(f"🔍 Procesando: {nombre}")
+            try:
+                resultados = scrape_fuente(nombre, url, tipo, idioma)
+                for fila in resultados:
+                    if fila[0] not in existentes:
+                        nuevas.append(fila)
+                        print(f"➕ Nueva convocatoria: {fila[0]}")
+                    else:
+                        print(f"🔁 Ya existe: {fila[0]}")
+            except Exception as e:
+                print(f"❌ Falló la fuente {nombre}: {e}")
+            time.sleep(3)
 
-    if nuevas:
-        hoja_convocatorias.append_rows(nuevas)
-        print(f"✅ Se agregaron {len(nuevas)} convocatorias nuevas.")
-    else:
-        print("📭 No se encontraron convocatorias nuevas.")
+        if nuevas:
+            hoja_convocatorias.append_rows(nuevas)
+            print(f"✅ {len(nuevas)} nuevas convocatorias agregadas.")
+        else:
+            print("📭 No hay convocatorias nuevas.")
+    except APIError as e:
+        print("🚨 Límite de peticiones alcanzado. Espera unos minutos.")
+        print(e)
 
-# 🚀 Endpoint principal de Flask para Render
-@app.route('/')
+@app.route("/")
 def home():
     actualizar_convocatorias()
-    return "🤖 Bot ejecutado correctamente."
+    return "🤖 Bot de convocatorias ejecutado correctamente."
 
-# 🏁 Ejecutar la app
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
