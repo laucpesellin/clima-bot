@@ -11,7 +11,7 @@ from deep_translator import GoogleTranslator
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-SPREADSHEET_NAME = "Convocatorias_Agronegocios_CambioClimatico"
+SPREADSHEET_NAME = "Convocatorias Clima"
 CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # AJUSTA esto con el nombre real de tu JSON
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
