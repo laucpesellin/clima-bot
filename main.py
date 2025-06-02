@@ -1,61 +1,71 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from googletrans import Translator
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from deep_translator import GoogleTranslator
+from flask import Flask
+import dateparser
+from datetime import datetime
 
-# --- Configuración ---
+# CONFIGURACIÓN 🔧
+SPREADSHEET_NAME = "Convocatorias Clima"
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # ← cambia por el nombre de tu JSON de credenciales
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-CREDENTIALS_PATH = 'eli-rv-0a9f3f56cefa.json'  # <-- Reemplaza esto con el nombre real del archivo .json
-SPREADSHEET_NAME = 'Convocatorias Clima'
 
-# --- Conectar a Google Sheets ---
+# CONECTAR A SHEETS ✅
 def conectar_sheets():
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
-    cliente = gspread.authorize(creds)
-    return cliente
+    client = gspread.authorize(creds)
+    return client
 
-# --- Validar URL ---
-def es_url_valida(url):
-    return url.startswith("http://") or url.startswith("https://")
-
-# --- Scraping simplificado ---
+# SCRAPER INTELIGENTE 🤖
 def scrape_fuente(nombre, url, tipo, idioma):
-    print(f"🌐 Revisando fuente: {nombre} ({url})")
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        }
-        response = requests.get(url, headers=headers, timeout=20)
-        html = response.text.lower()
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.content, "html.parser")
+        text = soup.get_text(separator="\n")
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
 
-        # Bloquear páginas no válidas
-        bloqueos = [
-            "cloudflare", "access denied", "enable javascript", "just a moment",
-            "ray id", "403 forbidden", "cookies to continue", "digitar", "entrar", "biblioteca"
-        ]
-        if any(p in html for p in bloqueos):
-            print(f"🚫 Página protegida o vacía: {url}")
+        # Buscar fecha de cierre
+        fecha = None
+        for line in lines:
+            parsed_date = dateparser.parse(line, settings={"PREFER_DATES_FROM": "future"})
+            if parsed_date and parsed_date > datetime.now():
+                fecha = parsed_date.strftime("%Y-%m-%d")
+                break
+        if not fecha:
+            print(f"📭 No se encontró fecha de cierre futura para: {nombre}")
             return []
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-        text = soup.get_text(separator=' ', strip=True)
+        # Buscar título
+        titulo = soup.find("h1")
+        if titulo:
+            titulo = titulo.get_text(strip=True)
+        else:
+            titulo = lines[0][:120]  # fallback simple
 
-        # Filtrar si el texto útil no contiene términos esperados
-        if not any(keyword in text.lower() for keyword in ["convocatoria", "call for", "papers", "envío", "deadline", "fecha límite", "submissions"]):
-            print(f"⚠️ No contiene términos útiles, descartada: {url}")
+        # Buscar descripción larga
+        descripcion = ""
+        for line in lines:
+            if len(line) > 150 and "cookie" not in line.lower():
+                descripcion = line
+                break
+        if not descripcion:
+            print(f"⚠️ No hay descripción útil en: {nombre}")
             return []
 
-        titulo = soup.title.text.strip() if soup.title else f"Convocatoria de {nombre}"
-        descripcion = text[:1000]
-        descripcion_pt = GoogleTranslator(source='auto', target='pt').translate(descripcion)
-        hoy = datetime.today().strftime('%Y-%m-%d')
+        # Traducir
+        translator = Translator()
+        descripcion_pt = translator.translate(
+            descripcion,
+            src='es' if idioma.lower().startswith('es') else 'en',
+            dest='pt'
+        ).text
 
         return [[
             titulo,
             nombre,
-            hoy,
+            fecha,
             url,
             idioma,
             descripcion,
@@ -63,48 +73,47 @@ def scrape_fuente(nombre, url, tipo, idioma):
         ]]
 
     except Exception as e:
-        print(f"❌ Error procesando {nombre}: {e}")
+        print(f"❌ Error con {nombre}: {e}")
         return []
-        
-# --- Actualizar hoja ---
+
+# ACTUALIZAR CONVOCATORIAS 🔁
 def actualizar_convocatorias():
     gc = conectar_sheets()
     hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
     hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
 
     fuentes = hoja_fuentes.get_all_records()
-    existentes = hoja_convocatorias.col_values(1)  # Tópico
+    existentes = hoja_convocatorias.col_values(4)  # Usar URL como ID
 
     nuevas = []
 
     for fuente in fuentes:
-        if not all(k in fuente for k in ["Nombre", "URL", "Tipo", "Idioma"]):
-            print(f"⚠️ Encabezado faltante en fuente: {fuente}")
-            continue
-
-        nombre = fuente.get("Nombre", "").strip()
-        url = fuente.get("URL", "").strip()
-        tipo = fuente.get("Tipo", "").strip()
-        idioma = fuente.get("Idioma", "").strip()
-
-        if not es_url_valida(url):
-            print(f"⚠️ URL inválida: {url}")
-            continue
+        nombre = fuente["Nombre"]
+        url = fuente["URL"]
+        tipo = fuente["Tipo"]
+        idioma = fuente["Idioma"]
 
         nuevas_conv = scrape_fuente(nombre, url, tipo, idioma)
 
         for conv in nuevas_conv:
-            if conv[0] not in existentes:
+            if conv[3] not in existentes:
                 nuevas.append(conv)
             else:
-                print(f"🔁 Duplicado omitido: {conv[0]}")
+                print(f"🔁 Convocatoria duplicada omitida: {conv[0]}")
 
     if nuevas:
         hoja_convocatorias.append_rows(nuevas)
-        print(f"✅ {len(nuevas)} nuevas convocatorias agregadas.")
+        print(f"✅ Agregadas {len(nuevas)} nuevas convocatorias.")
     else:
-        print("📭 No hay nuevas convocatorias para agregar.")
+        print("📭 No hay convocatorias nuevas para agregar.")
 
-# --- Ejecutar ---
-if __name__ == '__main__':
+# FLASK PARA RENDER 🌐
+app = Flask(__name__)
+
+@app.route('/')
+def home():
     actualizar_convocatorias()
+    return "<h3>🤖 Bot ejecutado correctamente desde Render</h3>"
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=8080)
