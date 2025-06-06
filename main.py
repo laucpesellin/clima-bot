@@ -7,12 +7,13 @@ import time
 import dateparser
 from dateparser.search import search_dates
 from deep_translator import GoogleTranslator
+from datetime import datetime
 
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
 SPREADSHEET_NAME = "Convocatorias Clima"
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # AJUSTA esto con el nombre real de tu JSON
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 # === FUNCIONES ===
@@ -29,26 +30,33 @@ def traducir_texto(texto, idioma_origen="auto", idioma_destino="pt"):
         print(f"⚠️ Error de traducción: {e}")
         return texto
 
+def es_fecha_util(texto):
+    texto = texto.lower()
+    claves = ["cierre", "deadline", "fecha límite", "apply by", "plazo", "fecha de cierre"]
+    return any(clave in texto for clave in claves)
+
 def scrape_fuente(nombre, url, tipo, idioma):
     print(f"🔍 Procesando: {nombre}")
     try:
-        response = requests.get(url, timeout=10)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
     except Exception as e:
-        print(f"❌ Error con {nombre}: {e}")
+        print(f"❌ Error al acceder a {nombre}: {e}")
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
     text_content = soup.get_text(separator=" ").strip()
 
     convocatorias = []
-    posibles_fechas = list(set(search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])))
+    fechas_detectadas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
 
-    if posibles_fechas:
-        for texto, fecha in posibles_fechas:
-            if fecha and fecha > dateparser.parse("now"):
-                descripcion = texto.strip()
+    if fechas_detectadas:
+        for fragmento, fecha in fechas_detectadas:
+            if fecha and fecha > datetime.now() and es_fecha_util(fragmento):
+                descripcion = fragmento.strip()
                 descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
+
                 convocatorias.append([
                     descripcion[:100],
                     nombre,
@@ -58,9 +66,9 @@ def scrape_fuente(nombre, url, tipo, idioma):
                     descripcion,
                     descripcion_pt
                 ])
-                break
+                break  # solo la primera válida
     else:
-        print(f"📭 No se encontraron fechas válidas en {nombre}")
+        print(f"📭 No se encontraron fechas en contexto útil en {nombre}")
 
     time.sleep(2)
     return convocatorias
@@ -100,6 +108,5 @@ def home():
     actualizar_convocatorias()
     return "✅ Bot ejecutado correctamente."
 
-# === INICIO ===
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
