@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
 SPREADSHEET_NAME = "Convocatorias Clima"
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # Ajusta este nombre si cambia tu JSON
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # AJUSTA esto con tu JSON
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 # === FUNCIONES ===
@@ -42,20 +42,27 @@ def scrape_fuente(nombre, url, tipo, idioma):
     text_content = soup.get_text(separator=" ").strip()
 
     convocatorias = []
-    try:
-        posibles_fechas = list(set(search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])))
-    except Exception as e:
-        print(f"⚠️ No se pudieron extraer fechas de {nombre}: {e}")
-        return []
+    posibles_fechas = list(set(search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])))
 
     if posibles_fechas:
-        posibles_fechas.sort(key=lambda x: x[1])  # Ordenar por fecha
         for texto, fecha in posibles_fechas:
             if fecha and fecha > dateparser.parse("now"):
                 descripcion = texto.strip()
-                descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
+
+                # Normalizar idioma
+                idiomas_validos = {
+                    "español": "es", "es": "es",
+                    "ingles": "en", "inglés": "en", "en": "en",
+                    "portugues": "pt", "portugués": "pt", "pt": "pt",
+                    "francés": "fr", "fr": "fr"
+                }
+                idioma_origen = idioma.strip().lower()
+                idioma_origen = idiomas_validos.get(idioma_origen, "auto")
+
+                descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma_origen, idioma_destino="pt")
+
                 convocatorias.append([
-                    descripcion[:100],  # Título
+                    descripcion[:100],
                     nombre,
                     fecha.strftime("%Y-%m-%d"),
                     url,
@@ -67,7 +74,7 @@ def scrape_fuente(nombre, url, tipo, idioma):
     else:
         print(f"📭 No se encontraron fechas válidas en {nombre}")
 
-    time.sleep(2)  # Para evitar sobrecargar
+    time.sleep(2)
     return convocatorias
 
 def actualizar_convocatorias():
@@ -100,20 +107,14 @@ def actualizar_convocatorias():
     else:
         print("📭 No hay convocatorias nuevas para agregar.")
 
-# === RUTAS ===
-
-@app.route('/')
+@app.route("/")
 def home():
-    try:
-        actualizar_convocatorias()
-        return "✅ Bot ejecutado correctamente."
-    except Exception as e:
-        print(f"💥 Error inesperado en '/' => {e}")
-        return "❌ Error interno en el bot.", 200  # Para que UptimeRobot no tire 500
+    actualizar_convocatorias()
+    return "✅ Bot ejecutado correctamente."
 
-@app.route('/health')
+@app.route("/health")
 def health():
-    return "🟢 OK", 200
+    return "🟢 OK"
 
 # === INICIO ===
 if __name__ == '__main__':
