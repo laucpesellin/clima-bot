@@ -42,14 +42,16 @@ def scrape_fuente(nombre, url, tipo, idioma):
     text_content = soup.get_text(separator=" ").strip()
 
     convocatorias = []
-    posibles_fechas = list(set(search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])))
 
-    if posibles_fechas:
+    # ✅ Validamos que haya fechas antes de procesar
+    raw_fechas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
+    if raw_fechas:
+        posibles_fechas = list(set(raw_fechas))
         for texto, fecha in posibles_fechas:
             if fecha and fecha > dateparser.parse("now"):
                 descripcion = texto.strip()
 
-                # Normalizar idioma
+                # Normalizamos idioma
                 idiomas_validos = {
                     "español": "es", "es": "es",
                     "ingles": "en", "inglés": "en", "en": "en",
