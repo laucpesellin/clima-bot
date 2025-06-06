@@ -108,5 +108,19 @@ def home():
     actualizar_convocatorias()
     return "✅ Bot ejecutado correctamente."
 
+@app.route('/')
+def home():
+    try:
+        actualizar_convocatorias()
+        return "✅ Bot ejecutado correctamente."
+    except Exception as e:
+        print(f"💥 Error inesperado en '/' => {e}")
+        return "❌ Error interno en el bot.", 200  # Devuelve 200 para evitar 500 en uptime
+
+@app.route('/health')
+def health():
+    return "🟢 OK", 200
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
