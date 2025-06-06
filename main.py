@@ -117,6 +117,15 @@ def home():
         print(f"💥 Error inesperado en '/' => {e}")
         return "❌ Error interno en el bot.", 200  # Devuelve 200 para evitar 500 en uptime
 
+@app.route('/')
+def home():
+    try:
+        actualizar_convocatorias()
+        return "✅ Bot ejecutado correctamente."
+    except Exception as e:
+        print(f"💥 Error inesperado en '/' => {e}")
+        return "❌ Error interno en el bot.", 200  # evita 500 y mantiene el servicio "vivo"
+
 @app.route('/health')
 def health():
     return "🟢 OK", 200
