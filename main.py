@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
 SPREADSHEET_NAME = "Convocatorias Clima"
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # AJUSTA esto con tu JSON
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # Cambia esto si tu archivo tiene otro nombre
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 # === FUNCIONES ===
@@ -31,8 +31,13 @@ def traducir_texto(texto, idioma_origen="auto", idioma_destino="pt"):
 
 def scrape_fuente(nombre, url, tipo, idioma):
     print(f"🔍 Procesando: {nombre}")
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    }
+
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
     except Exception as e:
         print(f"❌ Error con {nombre}: {e}")
@@ -42,27 +47,13 @@ def scrape_fuente(nombre, url, tipo, idioma):
     text_content = soup.get_text(separator=" ").strip()
 
     convocatorias = []
+    fechas_encontradas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
 
-    # ✅ Validamos que haya fechas antes de procesar
-    raw_fechas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
-    if raw_fechas:
-        posibles_fechas = list(set(raw_fechas))
-        for texto, fecha in posibles_fechas:
+    if fechas_encontradas:
+        for texto, fecha in fechas_encontradas:
             if fecha and fecha > dateparser.parse("now"):
                 descripcion = texto.strip()
-
-                # Normalizamos idioma
-                idiomas_validos = {
-                    "español": "es", "es": "es",
-                    "ingles": "en", "inglés": "en", "en": "en",
-                    "portugues": "pt", "portugués": "pt", "pt": "pt",
-                    "francés": "fr", "fr": "fr"
-                }
-                idioma_origen = idioma.strip().lower()
-                idioma_origen = idiomas_validos.get(idioma_origen, "auto")
-
-                descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma_origen, idioma_destino="pt")
-
+                descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
                 convocatorias.append([
                     descripcion[:100],
                     nombre,
@@ -116,7 +107,7 @@ def home():
 
 @app.route("/health")
 def health():
-    return "🟢 OK"
+    return "👌 I'm alive!"
 
 # === INICIO ===
 if __name__ == '__main__':
