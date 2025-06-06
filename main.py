@@ -7,13 +7,12 @@ import time
 import dateparser
 from dateparser.search import search_dates
 from deep_translator import GoogleTranslator
-from datetime import datetime
 
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
 SPREADSHEET_NAME = "Convocatorias Clima"
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # Ajusta este nombre si cambia tu JSON
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 # === FUNCIONES ===
@@ -30,35 +29,33 @@ def traducir_texto(texto, idioma_origen="auto", idioma_destino="pt"):
         print(f"⚠️ Error de traducción: {e}")
         return texto
 
-def es_fecha_util(texto):
-    texto = texto.lower()
-    claves = ["cierre", "deadline", "fecha límite", "apply by", "plazo", "fecha de cierre"]
-    return any(clave in texto for clave in claves)
-
 def scrape_fuente(nombre, url, tipo, idioma):
     print(f"🔍 Procesando: {nombre}")
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
     except Exception as e:
-        print(f"❌ Error al acceder a {nombre}: {e}")
+        print(f"❌ Error con {nombre}: {e}")
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
     text_content = soup.get_text(separator=" ").strip()
 
     convocatorias = []
-    fechas_detectadas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
+    try:
+        posibles_fechas = list(set(search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])))
+    except Exception as e:
+        print(f"⚠️ No se pudieron extraer fechas de {nombre}: {e}")
+        return []
 
-    if fechas_detectadas:
-        for fragmento, fecha in fechas_detectadas:
-            if fecha and fecha > datetime.now() and es_fecha_util(fragmento):
-                descripcion = fragmento.strip()
+    if posibles_fechas:
+        posibles_fechas.sort(key=lambda x: x[1])  # Ordenar por fecha
+        for texto, fecha in posibles_fechas:
+            if fecha and fecha > dateparser.parse("now"):
+                descripcion = texto.strip()
                 descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
-
                 convocatorias.append([
-                    descripcion[:100],
+                    descripcion[:100],  # Título
                     nombre,
                     fecha.strftime("%Y-%m-%d"),
                     url,
@@ -66,11 +63,11 @@ def scrape_fuente(nombre, url, tipo, idioma):
                     descripcion,
                     descripcion_pt
                 ])
-                break  # solo la primera válida
+                break
     else:
-        print(f"📭 No se encontraron fechas en contexto útil en {nombre}")
+        print(f"📭 No se encontraron fechas válidas en {nombre}")
 
-    time.sleep(2)
+    time.sleep(2)  # Para evitar sobrecargar
     return convocatorias
 
 def actualizar_convocatorias():
@@ -103,10 +100,7 @@ def actualizar_convocatorias():
     else:
         print("📭 No hay convocatorias nuevas para agregar.")
 
-@app.route('/')
-def home():
-    actualizar_convocatorias()
-    return "✅ Bot ejecutado correctamente."
+# === RUTAS ===
 
 @app.route('/')
 def home():
@@ -115,21 +109,12 @@ def home():
         return "✅ Bot ejecutado correctamente."
     except Exception as e:
         print(f"💥 Error inesperado en '/' => {e}")
-        return "❌ Error interno en el bot.", 200  # Devuelve 200 para evitar 500 en uptime
-
-@app.route('/')
-def home():
-    try:
-        actualizar_convocatorias()
-        return "✅ Bot ejecutado correctamente."
-    except Exception as e:
-        print(f"💥 Error inesperado en '/' => {e}")
-        return "❌ Error interno en el bot.", 200  # evita 500 y mantiene el servicio "vivo"
+        return "❌ Error interno en el bot.", 200  # Para que UptimeRobot no tire 500
 
 @app.route('/health')
 def health():
     return "🟢 OK", 200
 
-
+# === INICIO ===
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
