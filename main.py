@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
 SPREADSHEET_NAME = "Convocatorias Clima"
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # Cambia esto si tu archivo tiene otro nombre
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # ⚠️ Ajusta si tu JSON tiene otro nombre
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 # === FUNCIONES ===
@@ -44,28 +44,42 @@ def scrape_fuente(nombre, url, tipo, idioma):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-    text_content = soup.get_text(separator=" ").strip()
+
+    # Buscar links con fechas
+    links_con_fechas = []
+    for link in soup.find_all("a", href=True):
+        text = link.get_text(" ", strip=True)
+        if not text:
+            continue
+        fechas = search_dates(text, languages=['en', 'es', 'fr', 'pt'])
+        if fechas:
+            for _, fecha in fechas:
+                if fecha and fecha > dateparser.parse("now"):
+                    href = link["href"]
+                    link_directo = href if href.startswith("http") else url.rstrip("/") + "/" + href.lstrip("/")
+                    links_con_fechas.append({
+                        "fecha": fecha,
+                        "descripcion": text,
+                        "link_directo": link_directo
+                    })
 
     convocatorias = []
-    fechas_encontradas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
-
-    if fechas_encontradas:
-        for texto, fecha in fechas_encontradas:
-            if fecha and fecha > dateparser.parse("now"):
-                descripcion = texto.strip()
-                descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
-                convocatorias.append([
-                    descripcion[:100],
-                    nombre,
-                    fecha.strftime("%Y-%m-%d"),
-                    url,
-                    idioma,
-                    descripcion,
-                    descripcion_pt
-                ])
-                break
+    if links_con_fechas:
+        for item in links_con_fechas:
+            descripcion = item["descripcion"]
+            descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
+            convocatorias.append([
+                descripcion[:100],
+                nombre,
+                item["fecha"].strftime("%Y-%m-%d"),
+                item["link_directo"],
+                idioma,
+                descripcion,
+                descripcion_pt
+            ])
+            break
     else:
-        print(f"📭 No se encontraron fechas válidas en {nombre}")
+        print(f"📭 No se encontraron fechas con links en {nombre}")
 
     time.sleep(2)
     return convocatorias
@@ -100,6 +114,8 @@ def actualizar_convocatorias():
     else:
         print("📭 No hay convocatorias nuevas para agregar.")
 
+# === RUTAS ===
+
 @app.route("/")
 def home():
     actualizar_convocatorias()
@@ -107,8 +123,9 @@ def home():
 
 @app.route("/health")
 def health():
-    return "👌 I'm alive!"
+    return "✅ OK"
 
-# === INICIO ===
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+# === EJECUCIÓN LOCAL / RENDER ===
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
