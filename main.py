@@ -7,20 +7,20 @@ import time
 import dateparser
 from dateparser.search import search_dates
 from deep_translator import GoogleTranslator
+from datetime import datetime
 
 app = Flask(__name__)
 
-# === CONFIGURACIÓN ===
+# === CONFIG ===
 SPREADSHEET_NAME = "Convocatorias Clima"
-CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"  # ⚠️ Ajusta si tu JSON tiene otro nombre
+CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 # === FUNCIONES ===
 
 def conectar_sheets():
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
-    client = gspread.authorize(creds)
-    return client
+    return gspread.authorize(creds)
 
 def traducir_texto(texto, idioma_origen="auto", idioma_destino="pt"):
     try:
@@ -29,11 +29,16 @@ def traducir_texto(texto, idioma_origen="auto", idioma_destino="pt"):
         print(f"⚠️ Error de traducción: {e}")
         return texto
 
+def to_naive(dt):
+    if dt and dt.tzinfo:
+        return dt.replace(tzinfo=None)
+    return dt
+
 def scrape_fuente(nombre, url, tipo, idioma):
     print(f"🔍 Procesando: {nombre}")
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
 
     try:
@@ -44,9 +49,8 @@ def scrape_fuente(nombre, url, tipo, idioma):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-
-    # Buscar links con fechas
     links_con_fechas = []
+
     for link in soup.find_all("a", href=True):
         text = link.get_text(" ", strip=True)
         if not text:
@@ -54,13 +58,14 @@ def scrape_fuente(nombre, url, tipo, idioma):
         fechas = search_dates(text, languages=['en', 'es', 'fr', 'pt'])
         if fechas:
             for _, fecha in fechas:
-                if fecha and fecha > dateparser.parse("now"):
+                fecha_naive = to_naive(fecha)
+                if fecha_naive and fecha_naive > datetime.now():
                     href = link["href"]
-                    link_directo = href if href.startswith("http") else url.rstrip("/") + "/" + href.lstrip("/")
+                    full_link = href if href.startswith("http") else url.rstrip("/") + "/" + href.lstrip("/")
                     links_con_fechas.append({
-                        "fecha": fecha,
+                        "fecha": fecha_naive,
                         "descripcion": text,
-                        "link_directo": link_directo
+                        "link_directo": full_link
                     })
 
     convocatorias = []
@@ -114,7 +119,7 @@ def actualizar_convocatorias():
     else:
         print("📭 No hay convocatorias nuevas para agregar.")
 
-# === RUTAS ===
+# === FLASK ROUTES ===
 
 @app.route("/")
 def home():
@@ -125,7 +130,7 @@ def home():
 def health():
     return "✅ OK"
 
-# === EJECUCIÓN LOCAL / RENDER ===
+# === INIT ===
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
