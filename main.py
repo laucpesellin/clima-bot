@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 import time
 from dateparser.search import search_dates
 from datetime import datetime
-from deep_translator import GoogleTranslator
+from deep_translator import GoogleTranslator, single_detection
 
 app = Flask(__name__)
 
@@ -22,14 +22,21 @@ def conectar_sheets():
     client = gspread.authorize(creds)
     return client
 
-def traducir_texto(texto, idioma_origen="auto", idioma_destino="pt"):
+def traducir_texto_auto(texto):
     try:
-        return GoogleTranslator(source=idioma_origen, target=idioma_destino).translate(texto)
+        return GoogleTranslator(source='auto', target='pt').translate(texto)
     except Exception as e:
-        print(f"⚠️ Error de traducción: {idioma_origen} --> {idioma_destino}\n{e}")
+        print(f"⚠️ Error de traducción automática:\n{e}")
         return texto
 
-def scrape_fuente(nombre, url, tipo, idioma):
+def detectar_idioma(texto):
+    try:
+        return single_detection(texto, api='google')
+    except Exception as e:
+        print(f"⚠️ Error detectando idioma: {e}")
+        return "desconocido"
+
+def scrape_fuente(nombre, url, tipo):
     print(f"🔍 Procesando: {nombre}")
     try:
         response = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
@@ -68,19 +75,20 @@ def scrape_fuente(nombre, url, tipo, idioma):
                 end = min(len(text_content), index + 75)
                 descripcion = text_content[start:end].strip()
 
-        descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
+        descripcion_pt = traducir_texto_auto(descripcion)
+        idioma_detectado = detectar_idioma(descripcion)
 
         convocatorias.append([
-            descripcion[:100],  # Título
-            nombre,             # Fuente
+            descripcion[:100],       # Título
+            nombre,                  # Fuente
             fecha.strftime("%Y-%m-%d"),  # Fecha
-            url,                # Enlace
-            idioma,             # Idioma
-            descripcion,        # Descripción
-            descripcion_pt      # Descripción (PT)
+            url,                     # Enlace
+            idioma_detectado,        # Idioma detectado (para hoja de convocatorias)
+            descripcion,             # Descripción original
+            descripcion_pt           # Descripción traducida
         ])
         print(f"✅ Convocatoria encontrada: {fecha.strftime('%Y-%m-%d')}")
-        break  # Solo la primera válida
+        break  # Solo primera convocatoria válida
 
     time.sleep(1)
     return convocatorias
@@ -100,10 +108,9 @@ def actualizar_convocatorias():
     for fuente in fuentes:
         nombre = fuente.get("Nombre") or fuente.get("Fonte")
         url = fuente.get("URL") or fuente.get("Enlace")
-        tipo = fuente.get("Tipo") or fuente.get("Tipo")  # Future-proofing
-        idioma = fuente.get("Idioma") or fuente.get("Língua")
+        tipo = fuente.get("Tipo") or fuente.get("Tipo")
 
-        nuevas_conv = scrape_fuente(nombre, url, tipo, idioma)
+        nuevas_conv = scrape_fuente(nombre, url, tipo)
 
         for conv in nuevas_conv:
             if conv[0] not in existentes:
