@@ -11,12 +11,9 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# === CONFIG ===
 SPREADSHEET_NAME = "Convocatorias Clima"
 CREDENTIALS_PATH = "eli-rv-0a9f3f56cefa.json"
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-
-# === FUNCIONES ===
 
 def conectar_sheets():
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, SCOPE)
@@ -91,8 +88,9 @@ def scrape_fuente(nombre, url, tipo, idioma):
 
 def actualizar_convocatorias():
     gc = conectar_sheets()
-    hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
-    hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
+    hoja = gc.open(SPREADSHEET_NAME)
+    hoja_fuentes = hoja.worksheet("Fuentes")
+    hoja_convocatorias = hoja.worksheet("Convocatorias Clima")
 
     fuentes = hoja_fuentes.get_all_records()
     existentes = hoja_convocatorias.col_values(1)
@@ -119,8 +117,6 @@ def actualizar_convocatorias():
     else:
         print("📭 No hay convocatorias nuevas para agregar.")
 
-# === FLASK ROUTES ===
-
 @app.route("/")
 def home():
     actualizar_convocatorias()
@@ -129,8 +125,6 @@ def home():
 @app.route("/health")
 def health():
     return "✅ OK"
-
-# === INIT ===
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
