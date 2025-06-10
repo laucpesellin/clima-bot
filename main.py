@@ -51,20 +51,23 @@ def scrape_fuente(nombre, url, tipo, idioma):
     convocatorias = []
     if posibles_fechas:
         for texto, fecha in posibles_fechas:
-            if fecha and fecha > datetime.now().astimezone(fecha.tzinfo):  # Comparar fechas con misma zona horaria
-                descripcion = texto.strip()
-                descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
-                convocatorias.append({
-                    "Título": descripcion[:100],
-                    "Fuente": nombre,
-                    "Fecha": fecha.strftime("%Y-%m-%d"),
-                    "Enlace": url,
-                    "Idioma": idioma,
-                    "Descripción": descripcion,
-                    "Descripción PT": descripcion_pt
-                })
-                print(f"✅ Convocatoria encontrada: {fecha.strftime('%Y-%m-%d')}")
-                break
+            # Convertir fecha a naive para evitar error de comparación
+            if fecha:
+                fecha_naive = fecha.replace(tzinfo=None)
+                if fecha_naive > datetime.now():
+                    descripcion = texto.strip()
+                    descripcion_pt = traducir_texto(descripcion, idioma_origen=idioma, idioma_destino="pt")
+                    convocatorias.append({
+                        "Título": descripcion[:100],
+                        "Fuente": nombre,
+                        "Fecha": fecha_naive.strftime("%Y-%m-%d"),
+                        "Enlace": url,
+                        "Idioma": idioma,
+                        "Descripción": descripcion,
+                        "Descripción PT": descripcion_pt
+                    })
+                    print(f"✅ Convocatoria encontrada: {fecha_naive.strftime('%Y-%m-%d')}")
+                    break
     else:
         print(f"📭 No se encontraron fechas con links en {nombre}")
 
@@ -77,7 +80,6 @@ def actualizar_convocatorias():
     hoja_fuentes = gc.open(SPREADSHEET_NAME).worksheet("Fuentes")
     hoja_convocatorias = gc.open(SPREADSHEET_NAME).worksheet("Convocatorias Clima")
 
-    # Leer encabezados reales
     headers = hoja_convocatorias.row_values(1)
     header_indices = {header: idx for idx, header in enumerate(headers)}
 
