@@ -4,9 +4,10 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from bs4 import BeautifulSoup
 import time
+import dateparser
 from dateparser.search import search_dates
+from deep_translator import GoogleTranslator
 from datetime import datetime
-from deep_translator import GoogleTranslator, single_detection
 
 app = Flask(__name__)
 
@@ -22,24 +23,17 @@ def conectar_sheets():
     client = gspread.authorize(creds)
     return client
 
-def traducir_texto_auto(texto):
+def traducir_texto(texto):
     try:
-        return GoogleTranslator(source='auto', target='pt').translate(texto)
+        return GoogleTranslator(source="auto", target="pt").translate(texto)
     except Exception as e:
-        print(f"⚠️ Error de traducción automática:\n{e}")
+        print(f"⚠️ Error de traducción: {e}")
         return texto
-
-def detectar_idioma(texto):
-    try:
-        return single_detection(texto, api='google')
-    except Exception as e:
-        print(f"⚠️ Error detectando idioma: {e}")
-        return "desconocido"
 
 def scrape_fuente(nombre, url, tipo):
     print(f"🔍 Procesando: {nombre}")
     try:
-        response = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
     except Exception as e:
         print(f"❌ Error con {nombre}: {e}")
@@ -48,55 +42,54 @@ def scrape_fuente(nombre, url, tipo):
     soup = BeautifulSoup(response.text, "html.parser")
     text_content = soup.get_text(separator=" ").strip()
 
-    convocatorias = []
-    posibles_fechas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
-
-    if not posibles_fechas:
-        print(f"📭 No se encontraron fechas con links en {nombre}")
+    if len(text_content) < 100:
+        print(f"⚠️ Contenido muy corto o vacío para {nombre}")
         return []
 
-    for texto, fecha in posibles_fechas:
-        if not fecha:
-            continue
+    convocatorias = []
+    fechas_detectadas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
 
-        now = datetime.now().astimezone()
-        if fecha.tzinfo is None:
-            fecha = fecha.replace(tzinfo=now.tzinfo)
+    if fechas_detectadas:
+        for texto, fecha in fechas_detectadas:
+            if fecha and fecha > datetime.now().astimezone(fecha.tzinfo):
+                descripcion = texto.strip()
+                index = text_content.find(descripcion)
 
-        if fecha <= now:
-            continue
+                if index != -1:
+                    punto_inicio = text_content.rfind('.', 0, index)
+                    punto_final = text_content.find('.', index)
 
-        descripcion = texto.strip()
+                    if punto_inicio == -1:
+                        punto_inicio = max(0, index - 100)
 
-        if len(descripcion.split()) < 4:
-            index = text_content.find(descripcion)
-            if index != -1:
-                start = max(0, index - 75)
-                end = min(len(text_content), index + 75)
-                descripcion = text_content[start:end].strip()
+                    if punto_final == -1:
+                        punto_final = min(len(text_content), index + 200)
 
-        descripcion_pt = traducir_texto_auto(descripcion)
-        idioma_detectado = detectar_idioma(descripcion)
+                    descripcion = text_content[punto_inicio + 1: punto_final + 1].strip()
 
-        convocatorias.append([
-            descripcion[:100],       # Título
-            nombre,                  # Fuente
-            fecha.strftime("%Y-%m-%d"),  # Fecha
-            url,                     # Enlace
-            idioma_detectado,        # Idioma detectado (para hoja de convocatorias)
-            descripcion,             # Descripción original
-            descripcion_pt           # Descripción traducida
-        ])
-        print(f"✅ Convocatoria encontrada: {fecha.strftime('%Y-%m-%d')}")
-        break  # Solo primera convocatoria válida
+                descripcion_pt = traducir_texto(descripcion)
 
-    time.sleep(1)
+                convocatorias.append([
+                    descripcion[:100],  # ID único basado en descripción
+                    nombre,
+                    fecha.strftime("%Y-%m-%d"),
+                    url,
+                    descripcion,
+                    descripcion_pt
+                ])
+                print(f"✅ Convocatoria encontrada: {fecha.strftime('%Y-%m-%d')}")
+                break
+    else:
+        print(f"📭 No se encontraron fechas con links en {nombre}")
+
+    time.sleep(2)
     return convocatorias
 
 def actualizar_convocatorias():
     print("📡 Conectando con Google Sheets...")
     gc = conectar_sheets()
     hoja = gc.open(SPREADSHEET_NAME)
+
     hoja_fuentes = hoja.worksheet("Fuentes")
     hoja_convocatorias = hoja.worksheet("Convocatorias Clima")
 
@@ -106,9 +99,12 @@ def actualizar_convocatorias():
     nuevas = []
 
     for fuente in fuentes:
-        nombre = fuente.get("Nombre") or fuente.get("Fonte")
-        url = fuente.get("URL") or fuente.get("Enlace")
-        tipo = fuente.get("Tipo") or fuente.get("Tipo")
+        nombre = fuente.get("Nombre")
+        url = fuente.get("URL")
+        tipo = fuente.get("Tipo") or "Otro"
+
+        if not nombre or not url:
+            continue
 
         nuevas_conv = scrape_fuente(nombre, url, tipo)
 
@@ -124,7 +120,7 @@ def actualizar_convocatorias():
     else:
         print("📭 No hay convocatorias nuevas para agregar.")
 
-# === ENDPOINTS ===
+    time.sleep(2)  # Evitar exceso de peticiones a Sheets
 
 @app.route('/')
 def home():
@@ -133,8 +129,8 @@ def home():
 
 @app.route('/health')
 def health():
-    return "✅ Online", 200
+    return "🟢 OK"
 
-# === EJECUCIÓN LOCAL ===
+# === INICIO ===
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
