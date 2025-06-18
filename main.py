@@ -7,7 +7,7 @@ import time
 import dateparser
 from dateparser.search import search_dates
 from deep_translator import GoogleTranslator
-from datetime import datetime
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 
@@ -49,36 +49,41 @@ def scrape_fuente(nombre, url, tipo):
     convocatorias = []
     fechas_detectadas = search_dates(text_content, languages=['en', 'es', 'fr', 'pt'])
 
+    print(">>> Fechas detectadas:", fechas_detectadas)
+
     if fechas_detectadas:
         for texto, fecha in fechas_detectadas:
-            if fecha and fecha > datetime.now().astimezone(fecha.tzinfo):
-                descripcion = texto.strip()
-                index = text_content.find(descripcion)
+            print("📅 Revisando:", fecha, "| Fragmento:", texto)
+            if fecha:
+                now = datetime.now(timezone.utc) if fecha.tzinfo else datetime.now()
+                if fecha > now:
+                    descripcion = texto.strip()
+                    index = text_content.find(descripcion)
 
-                if index != -1:
-                    punto_inicio = text_content.rfind('.', 0, index)
-                    punto_final = text_content.find('.', index)
+                    if index != -1:
+                        punto_inicio = text_content.rfind('.', 0, index)
+                        punto_final = text_content.find('.', index)
 
-                    if punto_inicio == -1:
-                        punto_inicio = max(0, index - 100)
+                        if punto_inicio == -1:
+                            punto_inicio = max(0, index - 100)
 
-                    if punto_final == -1:
-                        punto_final = min(len(text_content), index + 200)
+                        if punto_final == -1:
+                            punto_final = min(len(text_content), index + 200)
 
-                    descripcion = text_content[punto_inicio + 1: punto_final + 1].strip()
+                        descripcion = text_content[punto_inicio + 1: punto_final + 1].strip()
 
-                descripcion_pt = traducir_texto(descripcion)
+                    descripcion_pt = traducir_texto(descripcion)
 
-                convocatorias.append([
-                    descripcion[:100],  # ID único basado en descripción
-                    nombre,
-                    fecha.strftime("%Y-%m-%d"),
-                    url,
-                    descripcion,
-                    descripcion_pt
-                ])
-                print(f"✅ Convocatoria encontrada: {fecha.strftime('%Y-%m-%d')}")
-                break
+                    convocatorias.append([
+                        descripcion[:100],
+                        nombre,
+                        fecha.strftime("%Y-%m-%d"),
+                        url,
+                        descripcion,
+                        descripcion_pt
+                    ])
+                    print(f"✅ Convocatoria encontrada: {fecha.strftime('%Y-%m-%d')}")
+                    break
     else:
         print(f"📭 No se encontraron fechas con links en {nombre}")
 
@@ -115,12 +120,13 @@ def actualizar_convocatorias():
                 print(f"🔁 Convocatoria duplicada omitida: {conv[0]}")
 
     if nuevas:
+        print("➡️ A escribir en hoja:", nuevas)
         hoja_convocatorias.append_rows(nuevas)
         print(f"📝 Agregadas {len(nuevas)} nuevas convocatorias.")
     else:
         print("📭 No hay convocatorias nuevas para agregar.")
 
-    time.sleep(2)  # Evitar exceso de peticiones a Sheets
+    time.sleep(2)
 
 @app.route('/')
 def home():
