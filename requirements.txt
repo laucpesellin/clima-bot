@@ -6,3 +6,4 @@ beautifulsoup4
 deep-translator
 dateparser
 googletrans==4.0.0rc1
+sumy
